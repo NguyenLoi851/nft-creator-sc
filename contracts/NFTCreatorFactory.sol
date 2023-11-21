@@ -14,11 +14,21 @@ contract NFTCreatorFactory {
         uint price;
         uint nonce;
     }
+
+    struct CreatorInfo {
+        uint voteCount;
+        uint voteTotalPower;
+    }
+
     mapping(address => CollectionInfo) public collectionInfo;
     mapping(uint256 => address) public recordIdCollection;
     mapping(address => address[]) public creatorCollections;
+    mapping(address => mapping(address => bool)) public isBought; // buyer => collection => bool
+    mapping(address => address[]) public collectionListBought; // buyer => collections
+    mapping(address => CreatorInfo) public creatorInfo;
 
     address[] public collections;
+    address[] public creators;
 
     address public gameToken;
 
@@ -68,23 +78,48 @@ contract NFTCreatorFactory {
             msg.sender,
             0,
             0,
-            0,
+            1000000,
             0
         );
 
         collections.push(newCollection);
 
-        emit CollectionCreated(
-            recordId,
-            newCollection,
-            msg.sender
-        );
+        creatorInfo[msg.sender] = CreatorInfo(0, 0);
+        creators.push(msg.sender);
+
+        emit CollectionCreated(recordId, newCollection, msg.sender);
 
         return newCollection;
     }
 
+    function getAllCollectionsLength() external view returns (uint) {
+        return collections.length;
+    }
+
     function getAllCollections() external view returns (address[] memory) {
         return collections;
+    }
+
+    function getAllCreatorsLength() external view returns (uint) {
+        return creators.length;
+    }
+
+    function getAllCreators() external view returns (address[] memory) {
+        return creators;
+    }
+
+    function getAllCreatorsFullInfo()
+        external
+        view
+        returns (CreatorInfo[] memory)
+    {
+        CreatorInfo[] memory creatorsFullInfo = new CreatorInfo[](
+            creators.length
+        );
+        for (uint i = 0; i < creators.length; i++) {
+            creatorsFullInfo[i] = creatorInfo[creators[i]];
+        }
+        return creatorsFullInfo;
     }
 
     function getCollectionsByCreator(
@@ -101,29 +136,51 @@ contract NFTCreatorFactory {
 
     function voteCollection(address collection, uint votePower) external {
         require(votePower >= 1 && votePower <= 5, "Vote power out of range");
+        require(isBought[msg.sender][collection] == true, "Need buy NFT");
 
         CollectionInfo storage collectionFullInfo = collectionInfo[collection];
         collectionFullInfo.voteCount += 1;
         collectionFullInfo.voteTotalPower += votePower;
+
+        address creator = collectionFullInfo.creator;
+        CreatorInfo storage creatorFullInfo = creatorInfo[creator];
+        creatorFullInfo.voteCount += 1;
+        creatorFullInfo.voteTotalPower += votePower;
+
         emit VoteCreated(collection, votePower);
     }
 
-    function setPrice(address collection, uint price) external {
-        CollectionInfo storage collectionFullInfo = collectionInfo[collection];
-        collectionFullInfo.price = price;
+    function buyNFT(address[] memory allCollections) external {
+        for (uint i = 0; i < allCollections.length; i++) {
+            CollectionInfo storage collectionFullInfo = collectionInfo[
+                allCollections[i]
+            ];
+            IERC20(gameToken).transferFrom(
+                msg.sender,
+                collectionFullInfo.creator,
+                collectionFullInfo.price
+            );
+            ICollection(allCollections[i]).mint(
+                msg.sender,
+                collectionFullInfo.nonce
+            );
+            collectionFullInfo.nonce += 1;
+            isBought[msg.sender][allCollections[i]] = true;
+            collectionListBought[msg.sender].push(allCollections[i]);
+
+            emit NFTBought(allCollections[i], msg.sender);
+        }
     }
 
-    function buyNFT(address collection) external {
-        CollectionInfo storage collectionFullInfo = collectionInfo[collection];
+    function getCollectionListBoughtLength() external view returns (uint) {
+        return collectionListBought[msg.sender].length;
+    }
 
-        IERC20(gameToken).transferFrom(
-            msg.sender,
-            collectionFullInfo.creator,
-            collectionFullInfo.price
-        );
-        ICollection(collection).mint(msg.sender, collectionFullInfo.nonce);
-        collectionFullInfo.nonce += 1;
-
-        emit NFTBought(collection, msg.sender);
+    function getCollectionListBought()
+        external
+        view
+        returns (address[] memory)
+    {
+        return collectionListBought[msg.sender];
     }
 }
