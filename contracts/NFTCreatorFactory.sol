@@ -16,6 +16,8 @@ contract NFTCreatorFactory {
     }
 
     struct CreatorInfo {
+        address creator;
+        uint totalReward;
         uint voteCount;
         uint voteTotalPower;
     }
@@ -84,7 +86,7 @@ contract NFTCreatorFactory {
 
         collections.push(newCollection);
 
-        creatorInfo[msg.sender] = CreatorInfo(0, 0);
+        creatorInfo[msg.sender] = CreatorInfo(msg.sender, 0, 0, 0);
         creators.push(msg.sender);
 
         emit CollectionCreated(recordId, newCollection, msg.sender);
@@ -155,11 +157,16 @@ contract NFTCreatorFactory {
             CollectionInfo storage collectionFullInfo = collectionInfo[
                 allCollections[i]
             ];
+
+            CreatorInfo storage creatorFullInfo = creatorInfo[collectionFullInfo.creator];
+
             IERC20(gameToken).transferFrom(
                 msg.sender,
                 collectionFullInfo.creator,
                 collectionFullInfo.price
             );
+            creatorFullInfo.totalReward += collectionFullInfo.price;
+            
             ICollection(allCollections[i]).mint(
                 msg.sender,
                 collectionFullInfo.nonce
