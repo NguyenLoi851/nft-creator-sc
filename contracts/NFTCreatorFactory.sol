@@ -20,6 +20,7 @@ contract NFTCreatorFactory {
         uint totalReward;
         uint voteCount;
         uint voteTotalPower;
+        uint claimedAmount;
     }
 
     mapping(address => CollectionInfo) public collectionInfo;
@@ -28,6 +29,7 @@ contract NFTCreatorFactory {
     mapping(address => mapping(address => bool)) public isBought; // buyer => collection => bool
     mapping(address => address[]) public collectionListBought; // buyer => collections
     mapping(address => CreatorInfo) public creatorInfo;
+    mapping(address => bool) public isCreator;
 
     address[] public collections;
     address[] public creators;
@@ -35,6 +37,10 @@ contract NFTCreatorFactory {
     address public gameToken;
 
     address public collectionImpl;
+
+    uint public totalRewardAmount;
+
+    uint public totalVotingPower;
 
     event CollectionCreated(
         uint recordId,
@@ -45,6 +51,8 @@ contract NFTCreatorFactory {
     event VoteCreated(address collection, uint votePower);
 
     event NFTBought(address collection, address buyer);
+
+    event RewardClaimed(address creator, uint availableAmount);
 
     constructor(address _gameToken, address _collectionImpl) {
         gameToken = _gameToken;
@@ -86,8 +94,12 @@ contract NFTCreatorFactory {
 
         collections.push(newCollection);
 
-        creatorInfo[msg.sender] = CreatorInfo(msg.sender, 0, 0, 0);
-        creators.push(msg.sender);
+        creatorInfo[msg.sender] = CreatorInfo(msg.sender, 0, 0, 0, 0);
+
+        if (isCreator[msg.sender] == false) {
+            creators.push(msg.sender);
+            isCreator[msg.sender] = true;
+        }
 
         emit CollectionCreated(recordId, newCollection, msg.sender);
 
@@ -120,6 +132,10 @@ contract NFTCreatorFactory {
         );
         for (uint i = 0; i < creators.length; i++) {
             creatorsFullInfo[i] = creatorInfo[creators[i]];
+            creatorsFullInfo[i].totalReward = totalVotingPower == 0
+                ? 0
+                : ((totalRewardAmount / 2) *
+                    creatorInfo[creators[i]].voteTotalPower) / totalVotingPower;
         }
         return creatorsFullInfo;
     }
@@ -149,6 +165,8 @@ contract NFTCreatorFactory {
         creatorFullInfo.voteCount += 1;
         creatorFullInfo.voteTotalPower += votePower;
 
+        totalVotingPower += votePower;
+
         emit VoteCreated(collection, votePower);
     }
 
@@ -158,15 +176,19 @@ contract NFTCreatorFactory {
                 allCollections[i]
             ];
 
-            CreatorInfo storage creatorFullInfo = creatorInfo[collectionFullInfo.creator];
+            CreatorInfo storage creatorFullInfo = creatorInfo[
+                collectionFullInfo.creator
+            ];
 
             IERC20(gameToken).transferFrom(
                 msg.sender,
-                collectionFullInfo.creator,
+                address(this),
                 collectionFullInfo.price
             );
             creatorFullInfo.totalReward += collectionFullInfo.price;
-            
+
+            totalRewardAmount += collectionFullInfo.price;
+
             ICollection(allCollections[i]).mint(
                 msg.sender,
                 collectionFullInfo.nonce
@@ -177,6 +199,25 @@ contract NFTCreatorFactory {
 
             emit NFTBought(allCollections[i], msg.sender);
         }
+    }
+
+    function claimReward() external {
+        require(isCreator[msg.sender] == true, "User is not creator");
+        CreatorInfo storage creatorFullInfo = creatorInfo[msg.sender];
+
+        uint totalReward = totalVotingPower == 0
+            ? 0
+            : ((totalRewardAmount / 2) * creatorFullInfo.voteTotalPower) /
+                totalVotingPower;
+        uint availableAmount = totalReward - creatorFullInfo.claimedAmount;
+        creatorFullInfo.claimedAmount = totalReward;
+        require(
+            IERC20(gameToken).balanceOf(address(this)) >= availableAmount,
+            "Not enough reward amount"
+        );
+        IERC20(gameToken).transfer(msg.sender, availableAmount);
+
+        emit RewardClaimed(msg.sender, availableAmount);
     }
 
     function getCollectionListBoughtLength() external view returns (uint) {
