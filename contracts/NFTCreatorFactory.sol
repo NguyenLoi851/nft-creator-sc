@@ -30,6 +30,7 @@ contract NFTCreatorFactory {
     mapping(address => address[]) public collectionListBought; // buyer => collections
     mapping(address => CreatorInfo) public creatorInfo;
     mapping(address => bool) public isCreator;
+    mapping(address => mapping(uint => uint)) public voteHistory;
 
     address[] public collections;
     address[] public creators;
@@ -142,14 +143,29 @@ contract NFTCreatorFactory {
 
     function getCollectionsByCreator(
         address creator
-    ) external view returns (address[] memory) {
+    ) public view returns (address[] memory) {
         return creatorCollections[creator];
     }
 
     function getCollectionsLengthByCreator(
         address creator
-    ) external view returns (uint) {
+    ) public view returns (uint) {
         return creatorCollections[creator].length;
+    }
+
+    function getCollectionsFullInfoByCreator(
+        address creator
+    ) external view returns (CollectionInfo[] memory) {
+        address[] memory allCollections = getCollectionsByCreator(creator);
+        CollectionInfo[] memory collectionFullInfo = new CollectionInfo[](
+            allCollections.length
+        );
+
+        for (uint i = 0; i < allCollections.length; i++) {
+            collectionFullInfo[i] = collectionInfo[allCollections[i]];
+        }
+
+        return collectionFullInfo;
     }
 
     function voteCollection(address collection, uint votePower) external {
@@ -157,6 +173,11 @@ contract NFTCreatorFactory {
         require(isBought[msg.sender][collection] == true, "Need buy NFT");
 
         CollectionInfo storage collectionFullInfo = collectionInfo[collection];
+        require(
+            voteHistory[msg.sender][collectionFullInfo.recordId] == 0,
+            "Voted"
+        );
+
         collectionFullInfo.voteCount += 1;
         collectionFullInfo.voteTotalPower += votePower;
 
@@ -166,6 +187,7 @@ contract NFTCreatorFactory {
         creatorFullInfo.voteTotalPower += votePower;
 
         totalVotingPower += votePower;
+        voteHistory[msg.sender][collectionFullInfo.recordId] = votePower;
 
         emit VoteCreated(collection, votePower);
     }
@@ -201,6 +223,21 @@ contract NFTCreatorFactory {
         }
     }
 
+    function getClaimInfo(
+        address creator
+    ) public view returns (uint, uint, uint) {
+        CreatorInfo memory creatorFullInfo = creatorInfo[creator];
+        uint totalReward = totalVotingPower == 0
+            ? 0
+            : ((totalRewardAmount / 2) * creatorFullInfo.voteTotalPower) /
+                totalVotingPower;
+        uint availableAmount = totalReward > creatorFullInfo.claimedAmount
+            ? totalReward - creatorFullInfo.claimedAmount
+            : 0;
+
+        return (totalReward, creatorFullInfo.claimedAmount, availableAmount);
+    }
+
     function claimReward() external {
         require(isCreator[msg.sender] == true, "User is not creator");
         CreatorInfo storage creatorFullInfo = creatorInfo[msg.sender];
@@ -209,7 +246,10 @@ contract NFTCreatorFactory {
             ? 0
             : ((totalRewardAmount / 2) * creatorFullInfo.voteTotalPower) /
                 totalVotingPower;
-        uint availableAmount = totalReward - creatorFullInfo.claimedAmount;
+        uint availableAmount = totalReward > creatorFullInfo.claimedAmount
+            ? totalReward - creatorFullInfo.claimedAmount
+            : 0;
+
         creatorFullInfo.claimedAmount = totalReward;
         require(
             IERC20(gameToken).balanceOf(address(this)) >= availableAmount,
